@@ -191,6 +191,10 @@ class BinaryAlertConfig:
         return '{}.binaryalert-binaries.{}'.format(
             self.name_prefix.replace('_', '.'), self.aws_region
         )
+    
+    @property
+    def external_s3_bucket_resources(self) -> str:
+        return self._config['external_s3_bucket_resources']
 
     @property
     def retro_batch_size(self) -> int:

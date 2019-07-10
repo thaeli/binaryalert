@@ -10,6 +10,7 @@ import subprocess
 import sys
 from typing import Any, Callable, Dict, Generator, Iterable, Optional, Set, Tuple
 import unittest
+import re
 
 import boto3
 import cbapi
@@ -284,31 +285,56 @@ class Manager:
 
     def retro_fast(self) -> None:
         """Enumerate the most recent S3 inventory for fast retroactive analysis"""
-        bucket = boto3.resource('s3').Bucket(self._config.binaryalert_s3_bucket_name)
-        manifest_path = self._most_recent_manifest(bucket)
+        bucket_names = [self._config.binaryalert_s3_bucket_name] + self._config.external_s3_bucket_resources
+        for bucket_name in bucket_names:
+            bucket_name_re = re.search(r'(.*)\:(.*)',bucket_name)
+            if bucket_name_re:
+                # Matched, so the arn:aws:s3::: stuff can be dropped
+                if bucket_name_re.group(2):
+                    bucket_name = bucket_name_re.group(2)
+                else:
+                    print("Weird, the regex failed")
+            else:
+                # No match, so this item was a bare bucket name
+                bucket_name = bucket_name
 
-        if not manifest_path:
-            print('ERROR: No inventory manifest found in the last week')
-            print('You can run "./manage.py retro_slow" to manually enumerate the bucket')
-            return
+            bucket = boto3.resource('s3').Bucket(bucket_name)
+            manifest_path = self._most_recent_manifest(bucket)
 
-        print('Reading {}'.format(manifest_path))
-        self._enqueue(
-            self._config.binaryalert_analyzer_queue_name,
-            self._s3_batch_iterator(self._inventory_object_iterator(bucket, manifest_path)),
-            self._s3_msg_summary
-        )
+            if not manifest_path:
+                print('ERROR: No inventory manifest found in the last week for',bucket_name)
+                print('You can run "./manage.py retro_slow" to manually enumerate the bucket')
+            else:
+                print('Reading {}'.format(manifest_path))
+                self._enqueue(
+                    self._config.binaryalert_analyzer_queue_name,
+                    self._s3_batch_iterator(self._inventory_object_iterator(bucket, manifest_path)),
+                    self._s3_msg_summary
+                )
 
     def retro_slow(self) -> None:
         """Enumerate the entire S3 bucket for slow retroactive analysis"""
-        bucket = boto3.resource('s3').Bucket(self._config.binaryalert_s3_bucket_name)
-        key_iterator = (summary.key for summary in bucket.objects.all())
+        bucket_names = [self._config.binaryalert_s3_bucket_name] + self._config.external_s3_bucket_resources
+        for bucket_name in bucket_names:
+            bucket_name_re = re.search(r'(.*)\:(.*)',bucket_name)
+            if bucket_name_re:
+                # Matched, so the arn:aws:s3::: stuff can be dropped
+                if bucket_name_re.group(2):
+                    bucket_name = bucket_name_re.group(2)
+                else:
+                    print("Weird, the regex failed")
+            else:
+                # No match, so this item was a bare bucket name
+                bucket_name = bucket_name
 
-        self._enqueue(
-            self._config.binaryalert_analyzer_queue_name,
-            self._s3_batch_iterator(key_iterator),
-            self._s3_msg_summary
-        )
+            bucket = boto3.resource('s3').Bucket(bucket_name)
+            key_iterator = (summary.key for summary in bucket.objects.all())
+
+            self._enqueue(
+                self._config.binaryalert_analyzer_queue_name,
+                self._s3_batch_iterator(key_iterator),
+                self._s3_msg_summary
+            )
 
     @staticmethod
     def unit_test() -> None:
